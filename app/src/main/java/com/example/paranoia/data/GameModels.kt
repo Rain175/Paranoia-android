@@ -51,7 +51,16 @@ enum class QuestionCategory(
         description = "Your own friend-group roasts and inside jokes",
         gradientStartHex = 0xFF7E22CE,
         gradientEndHex = 0xFF4338CA
-    )
+    );
+
+    companion object {
+        val ONLINE_CATEGORIES = listOf(
+            QuestionCategory.ICEBREAKER,
+            QuestionCategory.FUNNY,
+            QuestionCategory.SPICY,
+            QuestionCategory.EXTREME
+        )
+    }
 }
 
 enum class CoinSide {
@@ -98,6 +107,7 @@ data class LocalGameState(
 data class OnlineRoomState(
     val roomCode: String = "",
     val hostName: String = "",
+    val hostSessionId: String = "",
     val isHost: Boolean = false,
     val myName: String = "",
     val players: List<Player> = emptyList(),
@@ -108,5 +118,7 @@ data class OnlineRoomState(
     val askerIdx: Int = 0,
     val currentQuestion: String = "",
     val coinResult: CoinSide? = null,
-    val selectedCategories: Set<QuestionCategory> = setOf(QuestionCategory.ICEBREAKER, QuestionCategory.FUNNY)
+    val selectedCategories: Set<QuestionCategory> = setOf(QuestionCategory.ICEBREAKER, QuestionCategory.FUNNY),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null
 )

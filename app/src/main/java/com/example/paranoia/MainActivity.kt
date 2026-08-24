@@ -67,6 +67,7 @@ fun ParanoiaApp(
     val currentScreen by viewModel.currentScreen.collectAsState()
     val localPlayers by viewModel.localPlayers.collectAsState()
     val selectedCategories by viewModel.selectedCategories.collectAsState()
+    val onlineSelectedCategories by viewModel.onlineSelectedCategories.collectAsState()
     val customQuestions by viewModel.customQuestions.collectAsState()
     val localGameState by viewModel.localGameState.collectAsState()
     val onlineRoomState by viewModel.onlineRoomState.collectAsState()
@@ -163,6 +164,8 @@ fun ParanoiaApp(
 
                 GameScreen.ONLINE_LOBBY -> {
                     OnlineLobbyScreen(
+                        selectedCategories = onlineSelectedCategories,
+                        onToggleCategory = { viewModel.toggleOnlineCategory(it) },
                         onCreateRoom = { hostName -> viewModel.createOnlineRoom(hostName) },
                         onJoinRoom = { code, name -> viewModel.joinOnlineRoom(code, name) },
                         onBack = { viewModel.navigateTo(GameScreen.MODE_SELECT) }
@@ -174,8 +177,6 @@ fun ParanoiaApp(
                     if (room != null) {
                         OnlineRoomScreen(
                             room = room,
-                            onAddPlayer = { viewModel.addPlayerToRoom(it) },
-                            onRemovePlayer = { viewModel.removePlayerFromRoom(it) },
                             onStartGame = { viewModel.startOnlineGame() },
                             onExit = { viewModel.setShowExitDialog(true) }
                         )

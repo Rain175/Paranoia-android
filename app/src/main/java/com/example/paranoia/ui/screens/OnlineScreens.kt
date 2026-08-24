@@ -1,5 +1,6 @@
 package com.example.paranoia.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -26,20 +27,20 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Casino
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.HourglassEmpty
-import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.QrCode
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -59,27 +60,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.paranoia.data.CoinSide
+import com.example.paranoia.data.GameData
 import com.example.paranoia.data.OnlineRoomState
-import com.example.paranoia.data.Player
+import com.example.paranoia.data.QuestionCategory
 import com.example.paranoia.ui.components.GameTopBar
 import com.example.paranoia.ui.components.GlassCard
 import com.example.paranoia.ui.components.NeonPrimaryButton
-import com.example.paranoia.ui.theme.AccentAmber
 import com.example.paranoia.ui.theme.AccentCyan
-import com.example.paranoia.ui.theme.AccentFuchsia
 import com.example.paranoia.ui.theme.AccentPink
 import com.example.paranoia.ui.theme.CardBorder
 import com.example.paranoia.ui.theme.DarkBackground
-import com.example.paranoia.ui.theme.HeadsCyan
 import com.example.paranoia.ui.theme.PrimaryPurple
-import com.example.paranoia.ui.theme.TailsFuchsia
 import com.example.paranoia.ui.theme.TextMuted
 import com.example.paranoia.ui.theme.TextPrimary
 import com.example.paranoia.ui.theme.TextSecondary
 
 @Composable
 fun OnlineLobbyScreen(
+    selectedCategories: Set<QuestionCategory>,
+    onToggleCategory: (QuestionCategory) -> Unit,
     onCreateRoom: (hostName: String) -> Unit,
     onJoinRoom: (code: String, playerName: String) -> Unit,
     onBack: () -> Unit
@@ -89,6 +88,17 @@ fun OnlineLobbyScreen(
     var roomCodeInput by remember { mutableStateOf("") }
     var activeTab by remember { mutableStateOf("create") } // "create" or "join"
 
+    val onlineCategories = QuestionCategory.ONLINE_CATEGORIES
+
+    val totalOnlineQuestions = remember(selectedCategories) {
+        var count = 0
+        if (selectedCategories.contains(QuestionCategory.ICEBREAKER)) count += GameData.ICEBREAKER_QUESTIONS.size
+        if (selectedCategories.contains(QuestionCategory.FUNNY)) count += GameData.FUNNY_QUESTIONS.size
+        if (selectedCategories.contains(QuestionCategory.SPICY)) count += GameData.SPICY_QUESTIONS.size
+        if (selectedCategories.contains(QuestionCategory.EXTREME)) count += GameData.EXTREME_QUESTIONS.size
+        count
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -96,7 +106,7 @@ fun OnlineLobbyScreen(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             GameTopBar(
-                title = "Party Room",
+                title = "Party Room (Crossplay)",
                 onBack = onBack
             )
 
@@ -107,6 +117,32 @@ fun OnlineLobbyScreen(
                     .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Crossplay Banner Badge
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0x1806B6D4))
+                        .border(1.dp, Color(0x4006B6D4), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Public,
+                        contentDescription = "Crossplay",
+                        tint = AccentCyan,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Crossplay active with Web & Mobile browsers!",
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = AccentCyan
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Mode Tabs
@@ -151,7 +187,7 @@ fun OnlineLobbyScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(28.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
                 if (activeTab == "create") {
                     // Create Room Section
@@ -184,15 +220,123 @@ fun OnlineLobbyScreen(
                                 )
                             )
 
+                            // Category Selection
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "SELECT ROOM CATEGORIES",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = TextSecondary
+                                )
+                                Text(
+                                    text = "$totalOnlineQuestions Qs in deck",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF38BDF8)
+                                )
+                            }
+
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                onlineCategories.forEach { cat ->
+                                    val isSelected = selectedCategories.contains(cat)
+                                    val catCount = when (cat) {
+                                        QuestionCategory.ICEBREAKER -> GameData.ICEBREAKER_QUESTIONS.size
+                                        QuestionCategory.FUNNY -> GameData.FUNNY_QUESTIONS.size
+                                        QuestionCategory.SPICY -> GameData.SPICY_QUESTIONS.size
+                                        QuestionCategory.EXTREME -> GameData.EXTREME_QUESTIONS.size
+                                        QuestionCategory.CUSTOM -> 0
+                                    }
+
+                                    val bgBrush = if (isSelected) {
+                                        Brush.linearGradient(
+                                            listOf(Color(cat.gradientStartHex), Color(cat.gradientEndHex))
+                                        )
+                                    } else {
+                                        Brush.linearGradient(
+                                            listOf(Color(0xFF181824), Color(0xFF181824))
+                                        )
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(bgBrush)
+                                            .border(
+                                                1.dp,
+                                                if (isSelected) Color(0x60FFFFFF) else CardBorder,
+                                                RoundedCornerShape(14.dp)
+                                            )
+                                            .clickable { onToggleCategory(cat) }
+                                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Text(
+                                                        text = cat.label,
+                                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                                        color = Color.White
+                                                    )
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                            .background(Color(0x33000000))
+                                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "$catCount",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = Color.White.copy(alpha = 0.85f)
+                                                        )
+                                                    }
+                                                }
+                                                Text(
+                                                    text = cat.description,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = if (isSelected) Color.White.copy(alpha = 0.85f) else TextMuted
+                                                )
+                                            }
+
+                                            Spacer(modifier = Modifier.width(10.dp))
+
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(24.dp)
+                                                    .clip(CircleShape)
+                                                    .background(if (isSelected) Color.White else Color.Transparent)
+                                                    .border(2.dp, if (isSelected) Color.White else CardBorder, CircleShape),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (isSelected) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = "Selected",
+                                                        tint = Color.Black,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             Text(
-                                text = "A 4-letter room code will be generated for friends to join from their devices.",
+                                text = "Note: Custom questions are reserved for Local Play.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextMuted
                             )
 
                             NeonPrimaryButton(
                                 text = "CREATE PARTY ROOM",
-                                enabled = hostNameInput.isNotBlank(),
+                                enabled = hostNameInput.isNotBlank() && selectedCategories.isNotEmpty(),
                                 icon = Icons.Default.Wifi,
                                 onClick = { onCreateRoom(hostNameInput) }
                             )
@@ -232,7 +376,7 @@ fun OnlineLobbyScreen(
                             OutlinedTextField(
                                 value = joinNameInput,
                                 onValueChange = { joinNameInput = it },
-                                label = { Text("Your Player Name") },
+                                label = { Text("Your Player Name (1 per device)") },
                                 placeholder = { Text("e.g. Jordan", color = TextMuted) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
@@ -267,13 +411,9 @@ fun OnlineLobbyScreen(
 @Composable
 fun OnlineRoomScreen(
     room: OnlineRoomState,
-    onAddPlayer: (String) -> Unit,
-    onRemovePlayer: (String) -> Unit,
     onStartGame: () -> Unit,
     onExit: () -> Unit
 ) {
-    var addPlayerName by remember { mutableStateOf("") }
-
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -281,7 +421,7 @@ fun OnlineRoomScreen(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             GameTopBar(
-                title = "Party Room: ${room.roomCode}",
+                title = "Room: ${room.roomCode}",
                 trailingBadge = if (room.isHost) "HOST" else "PLAYER",
                 onExit = onExit
             )
@@ -325,14 +465,58 @@ fun OnlineRoomScreen(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Friends can join using the Party Room tab",
+                            text = "Friends can join from web or mobile browsers!",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextMuted
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Single Device Policy Notice
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0x15FFFFFF))
+                        .border(1.dp, CardBorder, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Devices,
+                        contentDescription = "Devices",
+                        tint = AccentCyan,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "1 player per device. Everyone joins on their own screen!",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+                }
+
+                if (room.errorMessage != null) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0x30DC2626))
+                            .border(1.dp, Color(0xFFEF4444), RoundedCornerShape(12.dp))
+                            .padding(12.dp)
+                    ) {
+                        Text(
+                            text = room.errorMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFFCA5A5)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
 
                 // Connected Players List
                 Row(
@@ -357,7 +541,7 @@ fun OnlineRoomScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    room.players.forEach { player ->
+                    room.players.forEachIndexed { index, player ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -369,7 +553,7 @@ fun OnlineRoomScreen(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(32.dp)
+                                    .size(34.dp)
                                     .clip(CircleShape)
                                     .background(if (player.isHost) PrimaryPurple else Color(0xFF1E293B)),
                                 contentAlignment = Alignment.Center
@@ -382,7 +566,7 @@ fun OnlineRoomScreen(
                             }
                             Spacer(modifier = Modifier.width(12.dp))
                             Text(
-                                text = player.name + if (player.name == room.myName) " (You)" else "",
+                                text = player.name + if (player.name.equals(room.myName, ignoreCase = true)) " (You)" else "",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = TextPrimary,
                                 modifier = Modifier.weight(1f)
@@ -405,44 +589,12 @@ fun OnlineRoomScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Add simulated/guest player
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                        value = addPlayerName,
-                        onValueChange = { addPlayerName = it },
-                        placeholder = { Text("Add friend on same device...", color = TextMuted) },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color(0xFF161620),
-                            unfocusedContainerColor = Color(0xFF101016),
-                            focusedBorderColor = PrimaryPurple,
-                            unfocusedBorderColor = CardBorder,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
+                if (room.isLoading) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    CircularProgressIndicator(
+                        color = AccentCyan,
+                        modifier = Modifier.size(32.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            if (addPlayerName.isNotBlank()) {
-                                onAddPlayer(addPlayerName)
-                                addPlayerName = ""
-                            }
-                        },
-                        enabled = addPlayerName.isNotBlank(),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryPurple),
-                        modifier = Modifier.height(52.dp)
-                    ) {
-                        Text("Add")
-                    }
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))

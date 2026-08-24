@@ -1,8 +1,10 @@
 package com.example.paranoia.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.paranoia.data.CoinSide
+import com.example.paranoia.data.FirestoreService
 import com.example.paranoia.data.GameData
 import com.example.paranoia.data.GameRoundHistory
 import com.example.paranoia.data.GameScreen
@@ -10,16 +12,18 @@ import com.example.paranoia.data.LocalGameState
 import com.example.paranoia.data.OnlineRoomState
 import com.example.paranoia.data.Player
 import com.example.paranoia.data.QuestionCategory
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.UUID
 import kotlin.random.Random
 
 class GameViewModel : ViewModel() {
+    private val TAG = "GameViewModel"
 
     private val _currentScreen = MutableStateFlow(GameScreen.MODE_SELECT)
     val currentScreen: StateFlow<GameScreen> = _currentScreen.asStateFlow()
@@ -46,6 +50,15 @@ class GameViewModel : ViewModel() {
     // Online Game State
     private val _onlineRoomState = MutableStateFlow<OnlineRoomState?>(null)
     val onlineRoomState: StateFlow<OnlineRoomState?> = _onlineRoomState.asStateFlow()
+
+    // Online Category Selection (Strictly for Room Creation - No Custom Questions)
+    private val _onlineSelectedCategories = MutableStateFlow<Set<QuestionCategory>>(
+        setOf(QuestionCategory.ICEBREAKER, QuestionCategory.FUNNY)
+    )
+    val onlineSelectedCategories: StateFlow<Set<QuestionCategory>> = _onlineSelectedCategories.asStateFlow()
+
+    private var onlinePollingJob: Job? = null
+    private var roomQuestions: List<String> = emptyList()
 
     // Rules dialog state
     private val _showRulesDialog = MutableStateFlow(false)
@@ -93,7 +106,6 @@ class GameViewModel : ViewModel() {
     fun toggleCategory(category: QuestionCategory) {
         val current = _selectedCategories.value.toMutableSet()
         if (current.contains(category)) {
-            // keep at least 1 category selected
             if (current.size > 1) {
                 current.remove(category)
             }
@@ -101,6 +113,19 @@ class GameViewModel : ViewModel() {
             current.add(category)
         }
         _selectedCategories.value = current
+    }
+
+    fun toggleOnlineCategory(category: QuestionCategory) {
+        if (category == QuestionCategory.CUSTOM) return // Custom questions are strictly for local play
+        val current = _onlineSelectedCategories.value.toMutableSet()
+        if (current.contains(category)) {
+            if (current.size > 1) {
+                current.remove(category)
+            }
+        } else {
+            current.add(category)
+        }
+        _onlineSelectedCategories.value = current
     }
 
     fun addCustomQuestion(questionText: String) {
@@ -166,7 +191,6 @@ class GameViewModel : ViewModel() {
         val game = _localGameState.value ?: return
         val coinRes = game.coinResult ?: CoinSide.HEADS
 
-        // Record history
         val newHistory = game.history + GameRoundHistory(
             round = game.round + 1,
             askerName = game.players[game.askerIdx].name,
@@ -183,7 +207,6 @@ class GameViewModel : ViewModel() {
         val nextRound = game.round + 1
 
         if (nextRound >= game.questions.size) {
-            // End of deck, show stats
             _currentScreen.value = GameScreen.STATS_HISTORY
             return
         }
@@ -200,168 +223,274 @@ class GameViewModel : ViewModel() {
     }
 
     fun exitGame() {
+        stopOnlinePolling()
         _localGameState.value = null
         _onlineRoomState.value = null
         _showExitDialog.value = false
         _currentScreen.value = GameScreen.MODE_SELECT
     }
 
-    // Online Multiplayer Simulation & Party Room Logic
+    // ==========================================
+    // Real Crossplay Online Multiplayer (Firestore)
+    // ==========================================
+
     fun createOnlineRoom(hostName: String, maxRounds: Int = 10) {
         val code = generateRoomCode()
-        val hostPlayer = Player(
-            id = UUID.randomUUID().toString(),
-            name = hostName.trim().ifEmpty { "Host" },
-            order = 0,
-            isHost = true
-        )
+        val trimmedHost = hostName.trim().ifEmpty { "Host" }
+        val categories = _onlineSelectedCategories.value
+        val questions = GameData.getQuestionsForCategories(categories)
+        roomQuestions = questions
 
         _onlineRoomState.value = OnlineRoomState(
             roomCode = code,
-            hostName = hostPlayer.name,
+            hostName = trimmedHost,
+            hostSessionId = FirestoreService.mySessionId,
             isHost = true,
-            myName = hostPlayer.name,
-            players = listOf(hostPlayer),
+            myName = trimmedHost,
+            players = listOf(Player(id = FirestoreService.mySessionId, name = trimmedHost, order = 0, isHost = true)),
             status = "lobby",
             phase = "question",
             maxRounds = maxRounds,
-            selectedCategories = _selectedCategories.value
+            selectedCategories = categories,
+            isLoading = true
         )
         _currentScreen.value = GameScreen.ONLINE_ROOM
+
+        viewModelScope.launch {
+            val result = FirestoreService.createRoom(
+                roomCode = code,
+                hostName = trimmedHost,
+                selectedCategories = categories,
+                questions = questions,
+                maxRounds = maxRounds
+            )
+
+            if (result.isSuccess) {
+                _onlineRoomState.value = _onlineRoomState.value?.copy(isLoading = false)
+                startOnlinePolling(code)
+            } else {
+                _onlineRoomState.value = _onlineRoomState.value?.copy(
+                    isLoading = false,
+                    errorMessage = result.exceptionOrNull()?.localizedMessage ?: "Failed to create room in database"
+                )
+            }
+        }
     }
 
     fun joinOnlineRoom(code: String, playerName: String) {
         val upperCode = code.trim().uppercase()
         val pName = playerName.trim().ifEmpty { "Player" }
 
-        // If matching current room code or joining a room:
-        val currentRoom = _onlineRoomState.value
-        if (currentRoom != null && currentRoom.roomCode == upperCode) {
-            val newPlayer = Player(
-                id = UUID.randomUUID().toString(),
-                name = pName,
-                order = currentRoom.players.size,
-                isHost = false
-            )
-            _onlineRoomState.value = currentRoom.copy(
-                myName = pName,
-                isHost = false,
-                players = currentRoom.players + newPlayer
-            )
-        } else {
-            // Simulating joined room with bot party members or existing room
-            val defaultHost = Player(UUID.randomUUID().toString(), "Party Host", 0, true)
-            val joinPlayer = Player(UUID.randomUUID().toString(), pName, 1, false)
-            val friend1 = Player(UUID.randomUUID().toString(), "Alex", 2, false)
-            val friend2 = Player(UUID.randomUUID().toString(), "Jordan", 3, false)
-
-            _onlineRoomState.value = OnlineRoomState(
-                roomCode = upperCode,
-                hostName = defaultHost.name,
-                isHost = false,
-                myName = pName,
-                players = listOf(defaultHost, joinPlayer, friend1, friend2),
-                status = "lobby",
-                phase = "question"
-            )
-        }
-        _currentScreen.value = GameScreen.ONLINE_ROOM
-    }
-
-    fun addPlayerToRoom(name: String) {
-        val room = _onlineRoomState.value ?: return
-        val trimmed = name.trim()
-        if (trimmed.isEmpty()) return
-        val newPlayer = Player(
-            id = UUID.randomUUID().toString(),
-            name = trimmed,
-            order = room.players.size,
-            isHost = false
+        _onlineRoomState.value = OnlineRoomState(
+            roomCode = upperCode,
+            hostName = "",
+            myName = pName,
+            isHost = false,
+            players = emptyList(),
+            status = "lobby",
+            phase = "question",
+            isLoading = true
         )
-        _onlineRoomState.value = room.copy(players = room.players + newPlayer)
+        _currentScreen.value = GameScreen.ONLINE_ROOM
+
+        viewModelScope.launch {
+            val result = FirestoreService.joinRoom(upperCode, pName)
+            if (result.isSuccess) {
+                val joinedRoom = result.getOrNull()!!
+                _onlineRoomState.value = joinedRoom.copy(isLoading = false)
+                startOnlinePolling(upperCode)
+            } else {
+                _onlineRoomState.value = _onlineRoomState.value?.copy(
+                    isLoading = false,
+                    errorMessage = result.exceptionOrNull()?.localizedMessage ?: "Could not join room"
+                )
+            }
+        }
     }
 
-    fun removePlayerFromRoom(playerId: String) {
-        val room = _onlineRoomState.value ?: return
-        _onlineRoomState.value = room.copy(players = room.players.filter { it.id != playerId })
+    private fun startOnlinePolling(roomCode: String) {
+        stopOnlinePolling()
+        onlinePollingJob = viewModelScope.launch {
+            while (isActive) {
+                try {
+                    val roomRes = FirestoreService.getRoom(roomCode)
+                    if (roomRes.isSuccess && roomRes.getOrNull() != null) {
+                        val remoteRoom = roomRes.getOrNull()!!
+                        val currentLocal = _onlineRoomState.value
+
+                        // Fetch updated real players from /room_players
+                        val realPlayers = FirestoreService.getRoomPlayers(roomCode)
+                        val mergedPlayers = if (realPlayers.isNotEmpty()) realPlayers else remoteRoom.players
+
+                        val myName = currentLocal?.myName ?: ""
+                        val isHost = remoteRoom.hostSessionId == FirestoreService.mySessionId || currentLocal?.isHost == true
+
+                        val updated = remoteRoom.copy(
+                            myName = myName,
+                            isHost = isHost,
+                            players = mergedPlayers,
+                            selectedCategories = if (remoteRoom.selectedCategories.isNotEmpty()) remoteRoom.selectedCategories else currentLocal?.selectedCategories ?: setOf(QuestionCategory.ICEBREAKER, QuestionCategory.FUNNY)
+                        )
+
+                        _onlineRoomState.value = updated
+                        handleRemoteStateTransition(updated)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Polling error for room $roomCode", e)
+                }
+                delay(1500) // Poll every 1.5 seconds for snappy sync with web clients
+            }
+        }
+    }
+
+    private fun stopOnlinePolling() {
+        onlinePollingJob?.cancel()
+        onlinePollingJob = null
+    }
+
+    private fun handleRemoteStateTransition(room: OnlineRoomState) {
+        when (room.status) {
+            "lobby" -> {
+                if (_currentScreen.value != GameScreen.ONLINE_ROOM) {
+                    _currentScreen.value = GameScreen.ONLINE_ROOM
+                }
+            }
+            "playing" -> {
+                val currentAsker = room.players.getOrNull(room.askerIdx)
+                val isMyTurn = currentAsker?.name.equals(room.myName, ignoreCase = true)
+
+                if (room.phase == "question") {
+                    if (isMyTurn) {
+                        if (_currentScreen.value != GameScreen.ONLINE_QUESTION) {
+                            _currentScreen.value = GameScreen.ONLINE_QUESTION
+                        }
+                    } else {
+                        if (_currentScreen.value != GameScreen.ONLINE_WAITING) {
+                            _currentScreen.value = GameScreen.ONLINE_WAITING
+                        }
+                    }
+                } else if (room.phase == "result") {
+                    if (_currentScreen.value != GameScreen.ONLINE_RESULT) {
+                        _currentScreen.value = GameScreen.ONLINE_RESULT
+                    }
+                }
+            }
+            "ended" -> {
+                if (_currentScreen.value != GameScreen.ONLINE_END) {
+                    _currentScreen.value = GameScreen.ONLINE_END
+                }
+            }
+        }
     }
 
     fun startOnlineGame() {
         val room = _onlineRoomState.value ?: return
         if (room.players.size < 2) return
 
-        val questions = GameData.getQuestionsForCategories(
-            categories = room.selectedCategories,
-            customQuestions = _customQuestions.value
-        )
-        val shuffledPlayers = room.players.shuffled()
+        viewModelScope.launch {
+            val questions = if (roomQuestions.isNotEmpty()) roomQuestions else GameData.getQuestionsForCategories(room.selectedCategories)
+            val firstQuestion = questions.firstOrNull() ?: "Who in this room is the most mysterious?"
+            val playerNames = room.players.map { it.name }
 
-        _onlineRoomState.value = room.copy(
-            status = "playing",
-            phase = "question",
-            round = 0,
-            askerIdx = 0,
-            players = shuffledPlayers,
-            currentQuestion = questions.firstOrNull() ?: "Who is most likely to get arrested?",
-            coinResult = null
-        )
-
-        updateOnlineScreenPhase()
+            FirestoreService.updateGameRoom(
+                roomCode = room.roomCode,
+                hostSessionId = room.hostSessionId,
+                hostName = room.hostName,
+                status = "playing",
+                phase = "question",
+                round = 0,
+                askerIdx = 0,
+                currentQuestion = firstQuestion,
+                coinResult = "",
+                players = playerNames,
+                categories = room.selectedCategories,
+                questions = questions,
+                maxRounds = room.maxRounds
+            )
+        }
     }
 
     fun flipOnlineCoin() {
         val room = _onlineRoomState.value ?: return
         val result = if (Random.nextBoolean()) CoinSide.HEADS else CoinSide.TAILS
-        _onlineRoomState.value = room.copy(
-            phase = "result",
-            coinResult = result
-        )
-        _currentScreen.value = GameScreen.ONLINE_RESULT
+        val coinStr = if (result == CoinSide.HEADS) "heads" else "tails"
+
+        viewModelScope.launch {
+            val questions = if (roomQuestions.isNotEmpty()) roomQuestions else GameData.getQuestionsForCategories(room.selectedCategories)
+            val playerNames = room.players.map { it.name }
+
+            FirestoreService.updateGameRoom(
+                roomCode = room.roomCode,
+                hostSessionId = room.hostSessionId,
+                hostName = room.hostName,
+                status = "playing",
+                phase = "result",
+                round = room.round,
+                askerIdx = room.askerIdx,
+                currentQuestion = room.currentQuestion,
+                coinResult = coinStr,
+                players = playerNames,
+                categories = room.selectedCategories,
+                questions = questions,
+                maxRounds = room.maxRounds
+            )
+        }
     }
 
     fun nextOnlineRound() {
         val room = _onlineRoomState.value ?: return
         val nextRoundNum = room.round + 1
 
-        if (nextRoundNum >= room.maxRounds) {
-            _onlineRoomState.value = room.copy(status = "ended")
-            _currentScreen.value = GameScreen.ONLINE_END
-            return
-        }
+        viewModelScope.launch {
+            val questions = if (roomQuestions.isNotEmpty()) roomQuestions else GameData.getQuestionsForCategories(room.selectedCategories)
+            val playerNames = room.players.map { it.name }
 
-        val questions = GameData.getQuestionsForCategories(room.selectedCategories)
-        val nextQ = questions.getOrElse(nextRoundNum % questions.size) { "Who is the biggest gossip?" }
-        val nextAskerIdx = nextRoundNum % room.players.size
-
-        _onlineRoomState.value = room.copy(
-            round = nextRoundNum,
-            askerIdx = nextAskerIdx,
-            phase = "question",
-            currentQuestion = nextQ,
-            coinResult = null
-        )
-
-        updateOnlineScreenPhase()
-    }
-
-    private fun updateOnlineScreenPhase() {
-        val room = _onlineRoomState.value ?: return
-        val currentAsker = room.players.getOrNull(room.askerIdx)
-        val isMyTurn = currentAsker?.name.equals(room.myName, ignoreCase = true)
-
-        if (room.phase == "question") {
-            if (isMyTurn) {
-                _currentScreen.value = GameScreen.ONLINE_QUESTION
+            if (nextRoundNum >= room.maxRounds || nextRoundNum >= questions.size) {
+                FirestoreService.updateGameRoom(
+                    roomCode = room.roomCode,
+                    hostSessionId = room.hostSessionId,
+                    hostName = room.hostName,
+                    status = "ended",
+                    phase = "result",
+                    round = nextRoundNum,
+                    askerIdx = room.askerIdx,
+                    currentQuestion = room.currentQuestion,
+                    coinResult = "",
+                    players = playerNames,
+                    categories = room.selectedCategories,
+                    questions = questions,
+                    maxRounds = room.maxRounds
+                )
             } else {
-                _currentScreen.value = GameScreen.ONLINE_WAITING
+                val nextQ = questions.getOrElse(nextRoundNum % questions.size) { "Who is the biggest gossip?" }
+                val nextAskerIdx = nextRoundNum % room.players.size
+
+                FirestoreService.updateGameRoom(
+                    roomCode = room.roomCode,
+                    hostSessionId = room.hostSessionId,
+                    hostName = room.hostName,
+                    status = "playing",
+                    phase = "question",
+                    round = nextRoundNum,
+                    askerIdx = nextAskerIdx,
+                    currentQuestion = nextQ,
+                    coinResult = "",
+                    players = playerNames,
+                    categories = room.selectedCategories,
+                    questions = questions,
+                    maxRounds = room.maxRounds
+                )
             }
-        } else if (room.phase == "result") {
-            _currentScreen.value = GameScreen.ONLINE_RESULT
         }
     }
 
     private fun generateRoomCode(): String {
         val chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
         return (1..4).map { chars.random() }.joinToString("")
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopOnlinePolling()
     }
 }

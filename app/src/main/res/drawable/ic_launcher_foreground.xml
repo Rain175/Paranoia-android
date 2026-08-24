@@ -3,6 +3,6 @@
     <item
         android:width="66dp"
         android:height="66dp"
-        android:drawable="@drawable/paranoia_launcher_icon_1787567012377"
+        android:drawable="@drawable/app_icon_eye_1787568732087"
         android:gravity="center" />
 </layer-list>

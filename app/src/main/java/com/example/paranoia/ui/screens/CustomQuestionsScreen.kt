@@ -85,6 +85,32 @@ fun CustomQuestionsScreen(
             ) {
                 Spacer(modifier = Modifier.height(10.dp))
 
+                // Local play only banner
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0x18F59E0B))
+                        .border(1.dp, Color(0x40F59E0B), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.EditNote,
+                        contentDescription = null,
+                        tint = AccentAmber,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Custom questions are designed for Local Play on this device.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AccentAmber
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
                     backgroundColor = Color(0xFF14141E)
