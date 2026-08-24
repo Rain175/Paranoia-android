@@ -1,0 +1,9 @@
+{
+  "name": "paranoia",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "echo 'Android build ready'"
+  }
+}

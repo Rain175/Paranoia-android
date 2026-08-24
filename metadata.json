@@ -1,0 +1,8 @@
+{
+  "name": "Paranoia",
+  "description": "The ultimate party game — ask secret spicy questions and flip the coin to reveal the truth!",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
